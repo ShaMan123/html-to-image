@@ -65,7 +65,7 @@ async function decorate(
 function cloneCssStyle(nativeNode: HTMLElement, clonedNode: HTMLElement) {
   const source = window.getComputedStyle(nativeNode)
   const target = clonedNode.style
-
+  if (!target) return
   if (source.cssText) {
     target.cssText = source.cssText
   } else {
