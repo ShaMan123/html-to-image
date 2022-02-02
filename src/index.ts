@@ -1,131 +1,86 @@
+import { Options } from './options'
 import { cloneNode } from './cloneNode'
 import { embedImages } from './embedImages'
-import { embedWebFonts, getWebFontCss } from './embedWebFonts'
-import { createSvgDataURL } from './createSvgDataURL'
 import { applyStyleWithOptions } from './applyStyleWithOptions'
+import { embedWebFonts, getWebFontCSS } from './embedWebFonts'
 import {
-  delay,
-  createImage,
-  canvasToBlob,
   getNodeWidth,
   getNodeHeight,
   getPixelRatio,
+  createImage,
+  canvasToBlob,
+  nodeToDataURL,
 } from './util'
 
-export type Options = {
-  /**
-   * Width in pixels to be applied to node before rendering.
-   */
-  width?: number
-  /**
-   * Height in pixels to be applied to node before rendering.
-   */
-  height?: number
-  /**
-   * A string value for the background color, any valid CSS color value.
-   */
-  backgroundColor?: string
-  /**
-   * Width in pixels to be applied to canvas on export.
-   */
-  canvasWidth?: number
-  /**
-   * Height in pixels to be applied to canvas on export.
-   */
-  canvasHeight?: number
-  /**
-   * An object whose properties to be copied to node's style before rendering.
-   */
-  style?: Partial<CSSStyleDeclaration>
-  /**
-   * A function taking DOM node as argument. Should return `true` if passed
-   * node should be included in the output. Excluding node means excluding
-   * it's children as well.
-   */
-  filter?: (domNode: HTMLElement) => boolean
-  /**
-   * A number between `0` and `1` indicating image quality (e.g. 0.92 => 92%)
-   * of the JPEG image.
-   */
-  quality?: number
-  /**
-   * Set to `true` to append the current time as a query string to URL
-   * requests to enable cache busting.
-   */
-  cacheBust?: boolean
-  /**
-   * A data URL for a placeholder image that will be used when fetching
-   * an image fails. Defaults to an empty string and will render empty
-   * areas for failed images.
-   */
-  imagePlaceholder?: string
-  /**
-   * The pixel ratio of captured image. Defalut is the actual pixel ratio of
-   * the device. Set 1 to use as initial-scale 1 for the image
-   */
-  pixelRatio?: number
-  /**
-   * Option to skip the fonts download and embed.
-   */
-  skipFonts?: boolean
-  /**
-   * The preferred font format. If specified all other font formats are ignored.
-   */
-  preferredFontFormat?:
-    | 'woff'
-    | 'woff2'
-    | 'truetype'
-    | 'opentype'
-    | 'embedded-opentype'
-    | 'svg'
-    | string
-  /**
-   * A CSS string to specify for font embeds. If specified only this CSS will be present in the resulting image.
-   * Use with `getFontEmbedCss()` to create embed CSS for use across multiple calls to library functions.
-   */
-  fontEmbedCss?: string
-}
-
-function getImageSize(domNode: HTMLElement, options: Options = {}) {
-  const width = options.width || getNodeWidth(domNode)
-  const height = options.height || getNodeHeight(domNode)
+function getImageSize(node: HTMLElement, options: Options = {}) {
+  const width = options.width || getNodeWidth(node)
+  const height = options.height || getNodeHeight(node)
 
   return { width, height }
 }
 
-export async function toSvg(
-  domNode: HTMLElement,
+export async function toSvg<T extends HTMLElement>(
+  node: T,
   options: Options = {},
 ): Promise<string> {
-  const { width, height } = getImageSize(domNode, options)
+  const { width, height } = getImageSize(node, options)
 
-  return cloneNode(domNode, options.filter, true)
+  return Promise.resolve(node)
+    .then((nativeNode) => cloneNode(nativeNode, options, true))
     .then((clonedNode) => embedWebFonts(clonedNode!, options))
     .then((clonedNode) => embedImages(clonedNode, options))
     .then((clonedNode) => applyStyleWithOptions(clonedNode, options))
-    .then((clonedNode) => createSvgDataURL(clonedNode, width, height))
+    .then((clonedNode) => nodeToDataURL(clonedNode, width, height))
 }
 
-export const toSvgDataURL = toSvg
+const dimensionCanvasLimit = 16384 // as per https://developer.mozilla.org/en-US/docs/Web/HTML/Element/canvas#maximum_canvas_size
 
-export async function toCanvas(
-  domNode: HTMLElement,
+function checkCanvasDimensions(canvas: HTMLCanvasElement) {
+  if (
+    canvas.width > dimensionCanvasLimit ||
+    canvas.height > dimensionCanvasLimit
+  ) {
+    if (
+      canvas.width > dimensionCanvasLimit &&
+      canvas.height > dimensionCanvasLimit
+    ) {
+      if (canvas.width > canvas.height) {
+        canvas.height *= dimensionCanvasLimit / canvas.width
+        canvas.width = dimensionCanvasLimit
+      } else {
+        canvas.width *= dimensionCanvasLimit / canvas.height
+        canvas.height = dimensionCanvasLimit
+      }
+    } else if (canvas.width > dimensionCanvasLimit) {
+      canvas.height *= dimensionCanvasLimit / canvas.width
+      canvas.width = dimensionCanvasLimit
+    } else {
+      canvas.width *= dimensionCanvasLimit / canvas.height
+      canvas.height = dimensionCanvasLimit
+    }
+  }
+}
+export async function toCanvas<T extends HTMLElement>(
+  node: T,
   options: Options = {},
 ): Promise<HTMLCanvasElement> {
-  return toSvg(domNode, options)
+  return toSvg(node, options)
     .then(createImage)
-    .then(delay(100))
-    .then((image) => {
+    .then((img) => {
       const canvas = document.createElement('canvas')
       const context = canvas.getContext('2d')!
       const ratio = options.pixelRatio || getPixelRatio()
-      const { width, height } = getImageSize(domNode, options)
+      const { width, height } = getImageSize(node, options)
 
       const canvasWidth = options.canvasWidth || width
       const canvasHeight = options.canvasHeight || height
 
       canvas.width = canvasWidth * ratio
       canvas.height = canvasHeight * ratio
+
+      if (!options.skipAutoScale) {
+        checkCanvasDimensions(canvas)
+      }
       canvas.style.width = `${canvasWidth}`
       canvas.style.height = `${canvasHeight}`
 
@@ -134,49 +89,49 @@ export async function toCanvas(
         context.fillRect(0, 0, canvas.width, canvas.height)
       }
 
-      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+      context.drawImage(img, 0, 0, canvas.width, canvas.height)
 
       return canvas
     })
 }
 
-export async function toPixelData(
-  domNode: HTMLElement,
+export async function toPixelData<T extends HTMLElement>(
+  node: T,
   options: Options = {},
 ): Promise<Uint8ClampedArray> {
-  const { width, height } = getImageSize(domNode, options)
-  return toCanvas(domNode, options).then((canvas) => {
+  const { width, height } = getImageSize(node, options)
+  return toCanvas(node, options).then((canvas) => {
     const ctx = canvas.getContext('2d')!
     return ctx.getImageData(0, 0, width, height).data
   })
 }
 
-export async function toPng(
-  domNode: HTMLElement,
+export async function toPng<T extends HTMLElement>(
+  node: T,
   options: Options = {},
 ): Promise<string> {
-  return toCanvas(domNode, options).then((canvas) => canvas.toDataURL())
+  return toCanvas(node, options).then((canvas) => canvas.toDataURL())
 }
 
-export async function toJpeg(
-  domNode: HTMLElement,
+export async function toJpeg<T extends HTMLElement>(
+  node: T,
   options: Options = {},
 ): Promise<string> {
-  return toCanvas(domNode, options).then((canvas) =>
+  return toCanvas(node, options).then((canvas) =>
     canvas.toDataURL('image/jpeg', options.quality || 1),
   )
 }
 
-export async function toBlob(
-  domNode: HTMLElement,
+export async function toBlob<T extends HTMLElement>(
+  node: T,
   options: Options = {},
 ): Promise<Blob | null> {
-  return toCanvas(domNode, options).then(canvasToBlob)
+  return toCanvas(node, options).then(canvasToBlob)
 }
 
-export async function getWebFontEmbedCss(
-  domNode: HTMLElement,
+export async function getFontEmbedCSS<T extends HTMLElement>(
+  node: T,
   options: Options = {},
 ): Promise<string> {
-  return getWebFontCss(domNode, options)
+  return getWebFontCSS(node, options)
 }

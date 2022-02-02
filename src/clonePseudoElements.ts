@@ -1,69 +1,64 @@
 import { uuid, toArray } from './util'
 
-export function clonePseudoElements(
-  nativeNode: HTMLElement,
-  clonedNode: HTMLElement,
-) {
-  const pseudos = [':before', ':after']
-  pseudos.forEach((pseudo: Pseudo.Type) =>
-    Pseudo.clonePseudoElement(nativeNode, clonedNode, pseudo),
-  )
+type Pseudo = ':before' | ':after'
+
+function formatCSSText(style: CSSStyleDeclaration) {
+  const content = style.getPropertyValue('content')
+  return `${style.cssText} content: '${content.replace(/'|"/g, '')}';`
 }
 
-namespace Pseudo {
-  export type Type = ':before' | ':after'
+function formatCSSProperties(style: CSSStyleDeclaration) {
+  return toArray<string>(style)
+    .map((name) => {
+      const value = style.getPropertyValue(name)
+      const priority = style.getPropertyPriority(name)
 
-  export function clonePseudoElement(
-    nativeNode: HTMLElement,
-    clonedNode: HTMLElement,
-    pseudo: Type,
-  ) {
-    const style = window.getComputedStyle(nativeNode, pseudo)
-    const content = style.getPropertyValue('content')
-    if (content === '' || content === 'none') {
-      return
-    }
+      return `${name}: ${value}${priority ? ' !important' : ''};`
+    })
+    .join(' ')
+}
 
-    const className = uuid()
+function getPseudoElementStyle(
+  className: string,
+  pseudo: Pseudo,
+  style: CSSStyleDeclaration,
+): Text {
+  const selector = `.${className}:${pseudo}`
+  const cssText = style.cssText
+    ? formatCSSText(style)
+    : formatCSSProperties(style)
 
-    // fix: Cannot assign to read only property 'className' of object '#<…
-    try {
-      clonedNode.className = `${clonedNode.className} ${className}`
-    } catch (err) {
-      return
-    }
+  return document.createTextNode(`${selector}{${cssText}}`)
+}
 
-    const styleElement = document.createElement('style')
-    styleElement.appendChild(getPseudoElementStyle(className, pseudo, style))
-    clonedNode.appendChild(styleElement)
+function clonePseudoElement<T extends HTMLElement>(
+  nativeNode: T,
+  clonedNode: T,
+  pseudo: Pseudo,
+) {
+  const style = window.getComputedStyle(nativeNode, pseudo)
+  const content = style.getPropertyValue('content')
+  if (content === '' || content === 'none') {
+    return
   }
 
-  function getPseudoElementStyle(
-    className: string,
-    pseudo: Type,
-    style: CSSStyleDeclaration,
-  ): Text {
-    const selector = `.${className}:${pseudo}`
-    const cssText = style.cssText
-      ? formatCssText(style)
-      : formatCssProperties(style)
+  const className = uuid()
 
-    return document.createTextNode(`${selector}{${cssText}}`)
+  try {
+    clonedNode.className = `${clonedNode.className} ${className}`
+  } catch (err) {
+    return
   }
 
-  function formatCssText(style: CSSStyleDeclaration) {
-    const content = style.getPropertyValue('content')
-    return `${style.cssText} content: ${content};`
-  }
+  const styleElement = document.createElement('style')
+  styleElement.appendChild(getPseudoElementStyle(className, pseudo, style))
+  clonedNode.appendChild(styleElement)
+}
 
-  function formatCssProperties(style: CSSStyleDeclaration) {
-    return toArray<string>(style)
-      .map((name) => {
-        const value = style.getPropertyValue(name)
-        const priority = style.getPropertyPriority(name)
-
-        return `${name}: ${value}${priority ? ' !important' : ''};`
-      })
-      .join(' ')
-  }
+export function clonePseudoElements<T extends HTMLElement>(
+  nativeNode: T,
+  clonedNode: T,
+) {
+  clonePseudoElement(nativeNode, clonedNode, ':before')
+  clonePseudoElement(nativeNode, clonedNode, ':after')
 }

@@ -5,10 +5,11 @@
 <p align="center">Fork from <a href="https://github.com/tsayen/dom-to-image" rel="nofollow">dom-to-image</a> with more maintainable code and some new features.</p>
 
 <p align="center">
-<a href="https://github.com/bubkoo/html-to-image/blob/master/LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT_License-green.svg?style=flat-square"></a>
-<a href="https://www.typescriptlang.org" rel="nofollow"><img alt="Language" src="https://img.shields.io/badge/language-typescript-blue.svg?style=flat-square" /></a>
-<a href="https://travis-ci.org/bubkoo/html-to-image" rel="nofollow"><img alt="build" src="https://img.shields.io/travis/bubkoo/html-to-image.svg?style=flat-square" /></a>
-<a href="https://coveralls.io/github/bubkoo/html-to-image" rel="nofollow"><img alt="coverage" src="https://img.shields.io/coveralls/bubkoo/html-to-image/master.svg?style=flat-square" /></a>
+<a href="/LICENSE"><img src="https://img.shields.io/github/license/bubkoo/html-to-image?style=flat-square" alt="MIT License"></a>
+<a href="https://www.typescriptlang.org"><img alt="Language" src="https://img.shields.io/badge/language-TypeScript-blue.svg?style=flat-square"></a>
+<a href="https://github.com/bubkoo/html-to-image/pulls"><img alt="PRs Welcome" src="https://img.shields.io/badge/PRs-Welcome-brightgreen.svg?style=flat-square"></a>
+<a href="https://github.com/bubkoo/html-to-image/actions/workflows/ci.yml"><img alt="build" src="https://img.shields.io/github/workflow/status/bubkoo/html-to-image/%F0%9F%91%B7%E3%80%80CI/master?logo=github&style=flat-square"></a>
+<a href="https://app.codecov.io/gh/bubkoo/html-to-image"><img alt="coverage" src="https://img.shields.io/codecov/c/gh/bubkoo/html-to-image?logo=codecov&style=flat-square&token=BWweeU2uNX"></a>
 <a href="https://lgtm.com/projects/g/bubkoo/html-to-image/context:javascript" rel="nofollow"><img alt="Language grade: JavaScript" src="https://img.shields.io/lgtm/grade/javascript/g/bubkoo/html-to-image.svg?logo=lgtm&style=flat-square" /></a>
 </p>
 
@@ -105,7 +106,11 @@ Get a PNG image blob and download it (using [FileSaver](https://github.com/eligr
 ```js
 htmlToImage.toBlob(document.getElementById('my-node'))
   .then(function (blob) {
-    window.saveAs(blob, 'my-node.png');
+    if (window.saveAs) {
+      window.saveAs(blob, 'my-node.png');
+    } else {
+     FileSaver.saveAs(blob, 'my-node.png');
+   }
   });
 ```
 
@@ -137,6 +142,42 @@ htmlToImage.toPixelData(node)
   });
 ```
 
+#### React
+```tsx
+import React, { useCallback, useRef } from 'react';
+import { toPng } from 'html-to-image';
+
+const App: React.FC = () => {
+  const ref = useRef<HTMLDivElement>(null)
+
+  const onButtonClick = useCallback(() => {
+    if (ref.current === null) {
+      return
+    }
+
+    toPng(ref.current, { cacheBust: true, })
+      .then((dataUrl) => {
+        const link = document.createElement('a')
+        link.download = 'my-image-name.png'
+        link.href = dataUrl
+        link.click()
+      })
+      .catch((err) => {
+        console.log(err)
+      })
+  }, [ref])
+
+  return (
+    <>
+      <div ref={ref}>
+      {/* DOM nodes you want to convert to PNG */}
+      </div>
+      <button onClick={onButtonClick}>Click me</button>
+    </>
+  )
+}
+```
+
 ## Options
 
 ### filter
@@ -146,6 +187,22 @@ htmlToImage.toPixelData(node)
 ```
 
 A function taking DOM node as argument. Should return true if passed node should be included in the output. Excluding node means excluding it's children as well.
+
+You can add filter to every image function. For example, 
+
+```js
+const filter = (node)=>{
+  const exclusionClasses = ['remove-me', 'secret-div'];
+  return !exclusionClasses.some(classname=>node.classList.includes(classname));
+}
+
+htmlToImage.toJpeg(node, { quality: 0.95, filter: filter});
+```
+or
+
+```js
+htmlToImage.toPng(node, {filter:filter})
+```
 
 Not called on the root node.
 
@@ -185,7 +242,7 @@ Defaults to an empty string and will render empty areas for failed images.
 
 ### pixelRatio
 
-The pixel ratio of the captured image. Defalut use the actual pixel ratio of the device. Set `1` to
+The pixel ratio of the captured image. Default use the actual pixel ratio of the device. Set `1` to
 use as initial-scale `1` for the image.
 
 ### preferredFontFormat
@@ -203,17 +260,31 @@ specifies several different formats for fonts in the CSS, for example:
 Instead of embedding each format, all formats other than the one specified will be discarded. If
 this option is not specified then all formats will be downloaded and embedded.
 
-### fontEmbedCss
+### fontEmbedCSS
 
-When supplied, the library will skip the process of parsing and embedding webfont URLs in CSS, 
-instead using this value. This is useful when combined with `.getFontEmbedCss()` to only perform the
+When supplied, the library will skip the process of parsing and embedding webfont URLs in CSS,
+instead using this value. This is useful when combined with `getFontEmbedCSS()` to only perform the
 embedding process a single time across multiple calls to library functions.
 
 ```javascript
-const fontEmbedCss = await htmlToImage.getFontEmbedCss(element1);
+const fontEmbedCss = await htmlToImage.getFontEmbedCSS(element1);
 html2Image.toSVG(element1, { fontEmbedCss });
 html2Image.toSVG(element2, { fontEmbedCss });
 ```
+
+### skipAutoScale
+
+When supplied, the library will skip the process of scaling extra large doms into the canvas object.
+You may experience loss of parts of the image if set to `true` and you are exporting a very large image.
+
+Defaults to `false`  
+
+### type
+
+A string indicating the image format. The default type is image/png; that type is also used if the given type isn't supported.
+When supplied, the toCanvas function will return a blob matching the given image type and quality. 
+
+Defaults to `image/png`  
 
 ## Browsers
 
@@ -258,6 +329,10 @@ This library uses a feature of SVG that allows having arbitrary HTML content ins
 
 ## Contributing
 
-Pull requests and stars are highly welcome.
+Please let us know how can we help. Do check out [issues](https://github.com/bubkoo/html-to-image/issues) for bug reports or suggestions first.
 
-For bugs and feature requests, please [create an issue](https://github.com/bubkoo/html-to-image/issues/new).
+To become a contributor, please follow our [contributing guide](/CONTRIBUTING.md).
+
+<a href="https://github.com/bubkoo/html-to-image/graphs/contributors">
+  <img src="/CONTRIBUTORS.svg" alt="Contributors" width="740" />
+</a>

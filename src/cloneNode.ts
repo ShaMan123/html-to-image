@@ -1,43 +1,66 @@
+import { Options } from './options'
+import { getBlobFromURL } from './getBlobFromURL'
 import { clonePseudoElements } from './clonePseudoElements'
-import { createImage, toArray } from './util'
+import { createImage, getMimeType, makeDataUrl, toArray } from './util'
 
-async function cloneSingleNode(
-  node: HTMLCanvasElement | SVGElement | HTMLElement,
-): Promise<HTMLElement> {
-  if (node instanceof HTMLCanvasElement) {
-    const dataURL = node.toDataURL()
-    if (dataURL === 'data:,') {
-      return Promise.resolve(node.cloneNode(false) as HTMLElement)
-    }
-
-    return createImage(dataURL)
+async function cloneCanvasElement(node: HTMLCanvasElement) {
+  const dataURL = node.toDataURL()
+  if (dataURL === 'data:,') {
+    return Promise.resolve(node.cloneNode(false) as HTMLCanvasElement)
   }
 
-  // if (node.tagName && node.tagName.toLowerCase() === 'svg') {
-  //   return Promise.resolve(node as SVGElement)
-  //     .then((svg) => svgToDataURL(svg))
-  //     .then(createImage)
-  // }
-
-  return Promise.resolve(node.cloneNode(false) as HTMLElement)
+  return createImage(dataURL)
 }
 
-async function cloneChildren(
-  nativeNode: HTMLElement,
-  clonedNode: HTMLElement,
-  filter?: Function,
+async function cloneVideoElement(node: HTMLVideoElement, options: Options) {
+  return Promise.resolve(node.poster)
+    .then((url) => getBlobFromURL(url, options))
+    .then((data) =>
+      makeDataUrl(data.blob, getMimeType(node.poster) || data.contentType),
+    )
+    .then((dataURL) => createImage(dataURL))
+}
+
+async function cloneSingleNode<T extends HTMLElement>(
+  node: T,
+  options: Options,
 ): Promise<HTMLElement> {
-  const children = toArray<HTMLElement>((nativeNode.shadowRoot ?? nativeNode).childNodes)
-  if (children.length === 0) {
+  if (node instanceof HTMLCanvasElement) {
+    return cloneCanvasElement(node)
+  }
+
+  if (node instanceof HTMLVideoElement && node.poster) {
+    return cloneVideoElement(node, options)
+  }
+
+  return Promise.resolve(node.cloneNode(false) as T)
+}
+
+const isSlotElement = (node: HTMLElement): node is HTMLSlotElement =>
+  node.tagName != null && node.tagName.toUpperCase() === 'SLOT'
+
+async function cloneChildren<T extends HTMLElement>(
+  nativeNode: T,
+  clonedNode: T,
+  options: Options,
+): Promise<T> {
+  const children =
+    isSlotElement(nativeNode) && nativeNode.assignedNodes
+      ? toArray<T>(nativeNode.assignedNodes())
+      : toArray<T>((nativeNode.shadowRoot ?? nativeNode).childNodes)
+
+  if (children.length === 0 || nativeNode instanceof HTMLVideoElement) {
     return Promise.resolve(clonedNode)
   }
 
   return children
     .reduce(
-      (done, child) =>
-        done
-          .then(() => cloneNode(child, filter))
+      (deferred, child) =>
+        deferred
+          // eslint-disable-next-line no-use-before-define
+          .then(() => cloneNode(child, options))
           .then((clonedChild: HTMLElement | null) => {
+            // eslint-disable-next-line promise/always-return
             if (clonedChild) {
               clonedNode.appendChild(clonedChild)
             }
@@ -47,25 +70,14 @@ async function cloneChildren(
     .then(() => clonedNode)
 }
 
-async function decorate(
-  nativeNode: HTMLElement,
-  clonedNode: HTMLElement,
-): Promise<HTMLElement> {
-  if (!(clonedNode instanceof Element)) {
-    return clonedNode
-  }
-
-  return Promise.resolve()
-    .then(() => cloneCssStyle(nativeNode, clonedNode))
-    .then(() => clonePseudoElements(nativeNode, clonedNode))
-    .then(() => cloneInputValue(nativeNode, clonedNode))
-    .then(() => clonedNode)
-}
-
-function cloneCssStyle(nativeNode: HTMLElement, clonedNode: HTMLElement) {
+function cloneCSSStyle<T extends HTMLElement>(nativeNode: T, clonedNode: T) {
   const source = window.getComputedStyle(nativeNode)
   const target = clonedNode.style
-  if (!target) return
+
+  if (!target) {
+    return
+  }
+
   if (source.cssText) {
     target.cssText = source.cssText
   } else {
@@ -79,7 +91,7 @@ function cloneCssStyle(nativeNode: HTMLElement, clonedNode: HTMLElement) {
   }
 }
 
-function cloneInputValue(nativeNode: HTMLElement, clonedNode: HTMLElement) {
+function cloneInputValue<T extends HTMLElement>(nativeNode: T, clonedNode: T) {
   if (nativeNode instanceof HTMLTextAreaElement) {
     clonedNode.innerHTML = nativeNode.value
   }
@@ -89,17 +101,32 @@ function cloneInputValue(nativeNode: HTMLElement, clonedNode: HTMLElement) {
   }
 }
 
-export async function cloneNode(
-  nativeNode: HTMLElement,
-  filter?: Function,
+async function decorate<T extends HTMLElement>(
+  nativeNode: T,
+  clonedNode: T,
+): Promise<T> {
+  if (!(clonedNode instanceof Element)) {
+    return Promise.resolve(clonedNode)
+  }
+
+  return Promise.resolve()
+    .then(() => cloneCSSStyle(nativeNode, clonedNode))
+    .then(() => clonePseudoElements(nativeNode, clonedNode))
+    .then(() => cloneInputValue(nativeNode, clonedNode))
+    .then(() => clonedNode)
+}
+
+export async function cloneNode<T extends HTMLElement>(
+  node: T,
+  options: Options,
   isRoot?: boolean,
-): Promise<HTMLElement | null> {
-  if (!isRoot && filter && !filter(nativeNode)) {
+): Promise<T | null> {
+  if (!isRoot && options.filter && !options.filter(node)) {
     return Promise.resolve(null)
   }
 
-  return Promise.resolve(nativeNode)
-    .then(cloneSingleNode)
-    .then((clonedNode) => cloneChildren(nativeNode, clonedNode, filter))
-    .then((clonedNode) => decorate(nativeNode, clonedNode))
+  return Promise.resolve(node)
+    .then((clonedNode) => cloneSingleNode(clonedNode, options) as Promise<T>)
+    .then((clonedNode) => cloneChildren(node, clonedNode, options))
+    .then((clonedNode) => decorate(node, clonedNode))
 }

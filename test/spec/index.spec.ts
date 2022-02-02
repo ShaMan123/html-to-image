@@ -1,3 +1,4 @@
+/* eslint-disable */
 import * as util from '../../src/util'
 import * as htmlToImage from '../../src'
 import * as embeding from '../../src/embedResources'
@@ -229,6 +230,46 @@ describe('html to image', () => {
         .then(done)
         .catch(done)
     })
+
+    describe('custom element', () => {
+      let link: HTMLLinkElement
+      beforeAll(() => {
+        const script = document.createElement('script')
+        script.src = 'https://unpkg.com/mathlive/dist/mathlive.min.js'
+        link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = 'https://unpkg.com/mathlive/dist/mathlive-fonts.css'
+        const tasks = [
+          new Promise((resolve, reject) => {
+            script.onload = resolve
+            script.onerror = reject
+          }),
+          new Promise((resolve, reject) => {
+            link.onload = resolve
+            link.onerror = reject
+          }),
+        ]
+        document.head.append(script, link)
+        return Promise.all(tasks)
+      })
+
+      afterAll(() => {
+        link.remove()
+      })
+
+      xit('should render content from shadow node of custom element', (done) => {
+        Helper.bootstrap(
+          'custom-element/node.html',
+          'custom-element/style.css',
+          'custom-element/image',
+        )
+          .then(util.delay(1000))
+          .then(Helper.renderAndCheck)
+          .then(util.delay(1000))
+          .then(done)
+          .catch(done)
+      })
+    })
   })
 
   describe('work with svg', () => {
@@ -255,6 +296,31 @@ describe('html to image', () => {
         'svg-color/node.html',
         'svg-color/style.css',
         'svg-color/image',
+      )
+        .then(Helper.renderAndCheck)
+        .then(done)
+        .catch(done)
+    })
+
+    it('should include a viewBox attribute', (done) => {
+      Helper.bootstrap('small/node.html', 'small/style.css', 'small/image')
+        .then(htmlToImage.toSvg)
+        .then(Helper.getSvgDocument)
+        .then((doc) => {
+          const width = doc.documentElement.getAttribute('width')
+          const height = doc.documentElement.getAttribute('height')
+          const viewBox = doc.documentElement.getAttribute('viewBox')
+          expect(viewBox).toEqual(`0 0 ${width} ${height}`)
+        })
+        .then(done)
+        .catch(done)
+    })
+
+    xit('should render svg `<image>` with href', (done) => {
+      Helper.bootstrap(
+        'svg-image/node.html',
+        'svg-image/style.css',
+        'svg-image/image',
       )
         .then(Helper.renderAndCheck)
         .then(done)
@@ -392,7 +458,7 @@ describe('html to image', () => {
         'fonts/web-fonts/empty.html',
         'fonts/web-fonts/remote.css',
       )
-        .then((node) => htmlToImage.toSvg(node, { fontEmbedCss: testCss }))
+        .then((node) => htmlToImage.toSvg(node, { fontEmbedCSS: testCss }))
         .then(Helper.getSvgDocument)
         .then((doc) => {
           const styles = Array.from(doc.getElementsByTagName('style'))
@@ -480,9 +546,11 @@ describe('html to image', () => {
             {},
             (url) =>
               Promise.resolve(
-                ({
-                  'http://acme.com/images/image.png': 'AAA',
-                } as any)[url],
+                (
+                  {
+                    'http://acme.com/images/image.png': 'AAA',
+                  } as any
+                )[url],
               ),
           )
           .then((result) => {
